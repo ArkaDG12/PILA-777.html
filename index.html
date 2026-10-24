@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PILA-777</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080808;color:#f5f5f5;font-family:Arial,sans-serif}
+.app{max-width:650px;margin:auto;padding:15px}
+header{display:flex;justify-content:space-between;align-items:center;padding:10px 0}
+.logo{font-size:23px;font-weight:bold;color:#ffd36a}
+button{cursor:pointer;font-size:15px;font-weight:bold;border:0;border-radius:10px;padding:14px;width:100%;margin:6px 0;background:#ffd36a;color:#17120a}
+button.secondary{background:#292929;color:white;border:1px solid #555}
+button:disabled{opacity:.5}
+h1,h2{text-align:center;color:#ffd36a}
+p{line-height:1.6}
+.panel{background:#171717;border:1px solid #393939;border-radius:15px;padding:17px;margin:14px 0}
+.center{text-align:center}
+.balance{text-align:center;font-size:19px;margin:20px 0}
+.gold{color:#ffd36a;font-weight:bold}
+.small{color:#aaa;font-size:12px;text-align:center}
+input{width:100%;padding:13px;background:#080808;border:1px solid #555;color:white;border-radius:9px;margin:8px 0 12px;font-size:16px}
+.reels{display:flex;gap:8px;margin:25px 0}
+.reel{flex:1;height:90px;display:grid;place-items:center;background:#080808;border:2px solid #555;border-radius:12px;font-size:43px}
+.board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:18px auto;max-width:440px}
+.tile{aspect-ratio:1;display:grid;place-items:center;background:#101010;border:1px solid #555;border-radius:7px;font-size:clamp(21px,6vw,35px)}
+.tile.hit{background:#604819;border-color:#ffd36a}
+.status{min-height:30px;text-align:center;color:#ffd36a;font-weight:bold;margin:15px 0}
+.pill{display:inline-block;border:1px solid #66512b;border-radius:8px;padding:7px;margin:3px;color:#ffd36a;font-size:12px}
+.hidden{display:none!important}
+.footer{text-align:center;color:#777;font-size:11px;margin:25px 0}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="logo">◈ PILA-777</div>
+  <button style="width:auto;padding:9px 14px" onclick="menu()">MENU</button>
+</header>
+
+<main id="screen">
+  <div class="panel center">
+    <h1>PILA-777</h1>
+    <p>Memuat permainan...</p>
+    <button onclick="start()">MULAI</button>
+  </div>
+</main>
+
+<div class="footer">SIMULASI AJA • SALDO HANYALAH ILUSI</div>
+</div>
+
+<script>
+"use strict";
+
+/* PENGATURAN */
+const START_BALANCE = 500000;
+const MIN_BET = 1000;
+const MAX_BET = 50000000;
+const LOAN_LIMIT = 3000000;
+const SAVE_KEY = "PILA777_COMPLETE_GAME_1";
+
+const symbols = ["🪙","☘️","🌺","🐲","⚡","🔱","💎"];
+const symbolValue = {
+  "🪙":3,"☘️":3,"🌺":4,"🐲":5,"⚡":6,"🔱":8,"💎":10
+};
+
+function newState(){
+  return {
+    balance:START_BALANCE,
+    bet:50000,
+    started:false,
+    game:"",
+    loan:0,
+    momUsed:false,
+    richChoiceUsed:false,
+    ended:false,
+    loanPromptUsed:false,
+    borrowedAfterPrompt:false
+  };
+}
+
+let state = newState();
+let busy = false;
+let board = [];
+let multipliers = [];
+let roundId = 0;
+
+const screen = document.getElementById("screen");
+
+function money(n){
+  return Math.floor(n).toLocaleString("id-ID");
+}
+
+function save(){
+  try{
+    localStorage.setItem(SAVE_KEY,JSON.stringify(state));
+  }catch(e){}
+}
+
+function load(){
+  try{
+    const raw = localStorage.getItem(SAVE_KEY);
+    if(!raw)return;
+
+    const data = JSON.parse(raw);
+    if(!data || typeof data.balance !== "number")return;
+
+    state = {...newState(),...data};
+
+    if(!Number.isFinite(state.balance) || state.balance < 0)
+      state.balance = START_BALANCE;
+
+    if(!Number.isFinite(state.bet))
+      state.bet = 50000;
+
+    state.bet = Math.max(
+      MIN_BET,
+      Math.min(MAX_BET,Math.floor(state.bet/1000)*1000)
+    );
+
+    state.loan = Math.max(
+      0,Math.min(LOAN_LIMIT,Number(state.loan)||0)
+    );
+  }catch(e){
+    state = newState();
+  }
+}
+
+function render(html){
+  screen.innerHTML = html;
+}
+
+function start(){
+  state.started = true;
+  save();
+  storyIntro();
+}
+
+function storyIntro(){
+  render(`
+    <div class="panel">
+      <h1>PILA-777</h1>
+      <p>Pada saat waktu senggang, datang temanmu bernama Alip mengajakmu untuk bermain slot. Ia menunjukkan bahwa ia mendapat banyak uang dari web tersebut. Kamu pun tertarik untuk bermain juga.</p>
+      <p>Saldo awalmu adalah <b class="gold">500.000 yibu</b>.</p>
+      <button onclick="menu()">LANJUT</button>
+    </div>
+  `);
+}
+
+function menu(){
+  if(state.ended){
+    endingScreen();
+    return;
+  }
+
+  roundId++;
+  busy = false;
+
+  render(`
+    <div class="panel center">
+      <div style="font-size:65px">👑</div>
+      <h1>PILA-777</h1>
+      <p>🚀WELKOM PARA SLOTERS🚀</p>
+      <div class="balance">Saldo: <span class="gold">${money(state.balance)} yibu</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>🇮🇩 PILA-777</h2>
+      <p class="center">Slot penguras uit dan otak</p>
+      <button onclick="openGame('pila')">MAIN PILA-777</button>
+    </div>
+
+    <div class="panel">
+      <h2>⚡ GATES OF OLYMPUS</h2>
+      <p class="center">Permainan kesukaan kake zeus</p>
+      <button onclick="openGame('olympus')">MAIN GATES OF OLYMPUS</button>
+    </div>
+
+    <div class="panel">
+      <p>Pinjol tipis²: <b class="gold">${money(state.loan)} / ${money(LOAN_LIMIT)}</b></p>
+      <button class="secondary" onclick="loanMenu()">PINJAMAN</button>
+      <button class="secondary" onclick="resetGame()">RESET PERMAINAN</button>
+    </div>
+  `);
+}
+
+function controls(){
+  return `
+    <div class="panel">
+      <label for="bet">Nominal taruhan (yibu)</label>
+      <input id="bet" type="number" min="${MIN_BET}" max="${MAX_BET}" step="1000" value="${state.bet}">
+      <div style="display:flex;justify-content:space-between;gap:8px">
+        <span>Saldo</span>
+        <b id="balance" class="gold">${money(state.balance)}</b>
+      </div>
+      <button class="secondary" onclick="maxBet()">TARUHAN MAKSIMUM</button>
+    </div>
+  `;
+}
+
+function openGame(name){
+  if(state.ended)return;
+
+  roundId++;
+  busy = false;
+  state.game = name;
+  state.started = true;
+  save();
+
+  if(name === "pila")renderPila();
+  else renderOlympus();
+}
+
+function renderPila(){
+  render(`
+    <div class="panel center">
+      <h1>PILA-777</h1>
+      <p>Ayo pake pola main nya!😹</p>
+    </div>
+    ${controls()}
+    <div class="reels" id="reels">
+      <div class="reel">🪙</div>
+      <div class="reel">🪙</div>
+      <div class="reel">🪙</div>
+    </div>
+    <div id="status" class="status">Ready spin nich</div>
+    <button id="spin" onclick="spinPila()">PUTAR</button>
+    <button class="secondary" onclick="menu()">KEMBALI KE MENU</button>
+  `);
+  bindBet();
+}
+
+function renderOlympus(){
+  board = Array.from({length:25},randomSymbol);
+  multipliers = Array(25).fill(0);
+
+  render(`
+    <div class="panel center">
+      <h1>⚡ GATES OF OLYMPUS</h1>
+      <p>Cocokkan 3 simbol atau lebih.</p>
+      <div>
+        <span class="pill">×2</span>
+        <span class="pill">×3</span>
+        <span class="pill">×5</span>
+        <span class="pill">×10</span>
+        <span class="pill">Maks. ×20</span>
+      </div>
+    </div>
+    ${controls()}
+    <div class="board" id="board">${board.map(tileHTML).join("")}</div>
+    <div id="status" class="status">Kake zeus menunggu</div>
+    <button id="spin" onclick="spinOlympus()">PUTAR</button>
+    <button class="secondary" onclick="menu()">KEMBALI KE MENU</button>
+  `);
+  bindBet();
+}
+
+function bindBet(){
+  const input = document.getElementById("bet");
+  if(!input)return;
+
+  input.addEventListener("change",function(){
+    if(busy)return;
+
+    let n = Number(input.value);
+    if(!Number.isFinite(n))n=MIN_BET;
+
+    n = Math.floor(n/1000)*1000;
+    n = Math.max(MIN_BET,Math.min(MAX_BET,n));
+
+    state.bet = n;
+    input.value = n;
+    save();
+  });
+}
+
+function maxBet(){
+  if(busy)return;
+
+  const n = Math.floor(Math.min(state.balance,MAX_BET)/1000)*1000;
+
+  if(n < MIN_BET){
+    storyCheck();
+    return;
+  }
+
+  state.bet = n;
+
+  const input = document.getElementById("bet");
+  if(input)input.value=n;
+
+  save();
+  setStatus("Taruhan: "+money(n)+" yibu");
+}
+
+function randomSymbol(){
+  return symbols[Math.floor(Math.random()*symbols.length)];
+}
+
+function tileHTML(symbol,index){
+  const m = multipliers[index] || 0;
+  return `<div class="tile" id="tile${index}">${symbol}${m ? `<small style="position:absolute;font-size:10px"></small>` : ""}</div>`;
+}
+
+function setStatus(message){
+  const el = document.getElementById("status");
+  if(el)el.textContent=message;
+}
+
+function refreshBalance(){
+  const el = document.getElementById("balance");
+  if(el)el.textContent=money(state.balance);
+  save();
+}
+
+function setBusy(value){
+  busy=value;
+  const button=document.getElementById("spin");
+  if(button)button.disabled=value;
+}
+
+function canPlay(){
+  if(busy || state.ended)return false;
+
+  const input=document.getElementById("bet");
+  if(input){
+    let n=Number(input.value);
+    if(!Number.isFinite(n))n=MIN_BET;
+    state.bet=Math.max(MIN_BET,Math.min(MAX_BET,Math.floor(n/1000)*1000));
+  }
+
+  if(state.balance < MIN_BET){
+    storyCheck();
+    return false;
+  }
+
+  if(state.bet > state.balance){
+    render(`
+      <div class="panel">
+        <h2>SALDO TIDAK CUKUP</h2>
+        <p>Saldo: ${money(state.balance)} yibu</p>
+        <p>Taruhan: ${money(state.bet)} yibu</p>
+        <button onclick="openGame('${state.game}')">KEMBALI DAN UBAH TARUHAN</button>
+        <button class="secondary" onclick="maxBet();openGame('${state.game}')">GUNAKAN TARUHAN MAKSIMUM</button>
+        <button class="secondary" onclick="menu()">MENU</button>
+      </div>
+    `);
+    return false;
+  }
+
+  state.balance -= state.bet;
+  save();
+  refreshBalance();
+  setBusy(true);
+  return true;
+}
+
+function finishRound(){
+  setBusy(false);
+  refreshBalance();
+  storyCheck();
+}
+
+function spinPila(){
+  if(!canPlay())return;
+
+  const thisRound=roundId;
+  const reels=Array.from(document.querySelectorAll(".reel"));
+  let finished=0;
+  setStatus("Memutar...");
+
+  reels.forEach((reel,index)=>{
+    let count=0;
+    const timer=setInterval(()=>{
+      if(thisRound!==roundId){
+        clearInterval(timer);
+        return;
+      }
+
+      reel.textContent=randomSymbol();
+      count++;
+
+      if(count>=10+index*4){
+        clearInterval(timer);
+        finished++;
+
+        if(finished===3){
+          const result=reels.map(r=>r.textContent);
+          let prize=0;
+
+          if(result[0]===result[1] && result[1]===result[2]){
+            prize=state.bet*symbolValue[result[0]];
+          }else if(
+            result[0]===result[1] ||
+            result[1]===result[2] ||
+            result[0]===result[2]
+          ){
+            prize=Math.floor(state.bet*1.5);
+          }
+
+          if(prize>0){
+            state.balance+=Math.floor(prize);
+            setStatus("MENANG "+money(prize)+" yibu!");
+          }else{
+            setStatus("Belum cocok. Coba lagi.");
+          }
+
+          save();
+          finishRound();
+        }
+      }
+    },100);
+  });
+}
+
+function findMatches(){
+  const found=new Set();
+
+  for(let r=0;r<5;r++){
+    for(let c=0;c<5;c++){
+      const i=r*5+c;
+      const s=board[i];
+
+      if(c<3 && board[i+1]===s && board[i+2]===s){
+        let x=c;
+        while(x<5 && board[r*5+x]===s){
+          found.add(r*5+x);
+          x++;
+        }
+      }
+
+      if(r<3 && board[i+5]===s && board[i+10]===s){
+        let y=r;
+        while(y<5 && board[y*5+c]===s){
+          found.add(y*5+c);
+          y++;
+        }
+      }
+    }
+  }
+
+  return [...found];
+}
+
+function drawBoard(){
+  const el=document.getElementById("board");
+  if(el)el.innerHTML=board.map(tileHTML).join("");
+}
+
+function spinOlympus(){
+  if(!canPlay())return;
+
+  const thisRound=roundId;
+  let total=0;
+  let cascades=0;
+
+  setStatus("Memutar...");
+
+  let shuffles=0;
+  const shuffleTimer=setInterval(()=>{
+    if(thisRound!==roundId){
+      clearInterval(shuffleTimer);
+      return;
+    }
+
+    board=Array.from({length:25},randomSymbol);
+    multipliers=board.map(()=>Math.random()<0.05
+      ? [2,3,5,10][Math.floor(Math.random()*4)]
+      : 0
+    );
+    drawBoard();
+    shuffles++;
+
+    if(shuffles>=4){
+      clearInterval(shuffleTimer);
+      resolveMatches();
+    }
+  },160);
+
+  function resolveMatches(){
+    if(thisRound!==roundId)return;
+
+    const hits=findMatches();
+
+    if(hits.length===0 || cascades>=5){
+      state.balance+=Math.floor(total);
+      if(total>0){
+        setStatus("Total menang "+money(total)+" yibu!");
+      }else{
+        setStatus("Tidak ada kombinasi. Coba lagi.");
+      }
+      save();
+      finishRound();
+      return;
+    }
+
+    cascades++;
+
+    hits.forEach(i=>{
+      const el=document.getElementById("tile"+i);
+      if(el)el.classList.add("hit");
+    });
+
+    let base=0;
+    let mult=0;
+
+    hits.forEach(i=>{
+      base+=state.bet*(symbolValue[board[i]]||3)/12;
+      mult+=multipliers[i]||0;
+    });
+
+    total+=Math.floor(base*(mult ? Math.min(20,mult) : 1));
+    setStatus("Combo "+cascades+" • "+money(total)+" yibu");
+
+    setTimeout(()=>{
+      if(thisRound!==roundId)return;
+
+      const hitSet=new Set(hits);
+
+      for(let c=0;c<5;c++){
+        const kept=[];
+
+        for(let r=4;r>=0;r--){
+          const i=r*5+c;
+          if(!hitSet.has(i)){
+            kept.push({s:board[i],m:multipliers[i]});
+          }
+        }
+
+        while(kept.length<5){
+          kept.push({
+            s:randomSymbol(),
+            m:Math.random()<0.05
+              ? [2,3,5,10][Math.floor(Math.random()*4)]
+              : 0
+          });
+        }
+
+        for(let r=4;r>=0;r--){
+          const item=kept[4-r];
+          board[r*5+c]=item.s;
+          multipliers[r*5+c]=item.m;
+        }
+      }
+
+      drawBoard();
+      resolveMatches();
+    },250);
+  }
+}
+
+/* CERITA DAN PINJAMAN */
+function storyCheck(){
+  if(state.ended || busy)return;
+
+  if(state.balance>=50000000){
+    state.ended=true;
+    save();
+    endingScreen("Kamu berhasil menjadi kaya dari judol. Berterimakasihlah pada Alip. ternyata dia lah pemilik slot tersebut,dia memilih membantumu dibalik layar. rispek mas. kirimkan code ini untuk claim hadiah (G77-cked)");
+    return;
+  }
+
+  if(state.balance>=25000000 && !state.richChoiceUsed){
+    state.richChoiceUsed=true;
+    save();
+
+    render(`
+      <div class="panel">
+        <h2>SALDO 25 JUTA YIBU!</h2>
+        <p>Saldo kamu sudah mencapai 25.000.000 yibu. Mau lanjut atau berhenti?</p>
+        <button onclick="menu()">LANJUT MAIN BENTAR LAGI KAYA WOK</button>
+        <button class="secondary" onclick="richStop()">BERHENTI BERMAIN</button>
+      </div>
+    `);
+    return;
+  }
+
+  if(state.balance<100000 && !state.momUsed){
+    state.momUsed=true;
+    save();
+
+    render(`
+      <div class="panel">
+        <h2>UANG MENIPIS</h2>
+        <p>Yibumu tersisa kurang dari 100.000. kamu harus cari uang tambahan nih</p>
+        <button onclick="stealStory()">MENCURI UANG IBU</button>
+        <button class="secondary" onclick="declineSteal()">TIDAK</button>
+      </div>
+    `);
+    return;
+  }
+
+  if(state.balance<MIN_BET){
+    if(state.borrowedAfterPrompt){
+      stopGame();
+      return;
+    }
+
+    if(!state.loanPromptUsed){
+      state.loanPromptUsed=true;
+      save();
+
+      render(`
+        <div class="panel">
+          <h2>UANGMU GA CUKUP LEK</h2>
+          <p>Yibu mu ga cukup lek untuk taruhan ini. Mau pinjam atau berhenti?</p>
+          <button onclick="loanMenu()">PINJAM YIBU</button>
+          <button class="secondary" onclick="stopGame()">BERHENTI BERMAIN</button>
+        </div>
+      `);
+    }else{
+      stopGame();
+    }
+  }
+}
+
+function declineSteal(){
+  menu();
+  storyCheck();
+}
+
+function stealStory(){
+  const amount=25000+Math.floor(Math.random()*56)*5000;
+  state.balance+=amount;
+  save();
+
+  render(`
+    <div class="panel">
+      <h2>PILIHAN CERITA</h2>
+      <p>GACOR kamu mendapatkan ${money(amount)} yibu dari dompet. hati hati nanti ketawan ibu loh.</p>
+      <button onclick="menu()">LANJUT</button>
+    </div>
+  `);
+}
+
+function loanMenu(){
+  if(state.ended)return;
+
+  if(state.balance>=MIN_BET){
+    render(`
+      <div class="panel">
+        <h2>PINJAMAN</h2>
+        <p>Pinjaman tersedia ketika saldo di bawah 1.000 yibu.</p>
+        <button onclick="menu()">KEMBALI</button>
+      </div>
+    `);
+    return;
+  }
+
+  if(state.borrowedAfterPrompt || LOAN_LIMIT-state.loan<50000){
+    stopGame();
+    return;
+  }
+
+  const remaining=LOAN_LIMIT-state.loan;
+
+  render(`
+    <div class="panel">
+      <h2>PINJAMAN YIBU</h2>
+      <p>Saldo: ${money(state.balance)} yibu</p>
+      <p>Total pinjaman: ${money(state.loan)} / ${money(LOAN_LIMIT)} yibu</p>
+      <label for="loanAmount">Jumlah pinjaman (kelipatan 50.000)</label>
+      <input id="loanAmount" type="number" min="50000" max="${remaining}" step="50000" value="50000">
+      <button onclick="borrowYibu()">PINJAM YIBU</button>
+      <button class="secondary" onclick="stopGame()">BERHENTI BERMAIN</button>
+    </div>
+  `);
+}
+
+function borrowYibu(){
+  const input=document.getElementById("loanAmount");
+  const amount=Number(input.value);
+  const remaining=LOAN_LIMIT-state.loan;
+
+  if(!Number.isFinite(amount) || amount<50000 ||
+     amount%50000!==0 || amount>remaining){
+    alert("Jumlah pinjaman harus kelipatan 50.000 dan gabole melebihi batas pinjaman.");
+    return;
+  }
+
+  state.loan+=amount;
+  state.balance+=amount;
+  state.borrowedAfterPrompt=true;
+  save();
+
+  render(`
+    <div class="panel">
+      <h2>PINJAMAN BERHASIL</h2>
+      <p>Kamu meminjam ${money(amount)} yibu.</p>
+      <p>Total pinjaman: ${money(state.loan)} yibu.</p>
+      <button onclick="menu()">LANJUT</button>
+    </div>
+  `);
+}
+
+function stopGame(){
+  state.ended=true;
+  save();
+  endingScreen("Uang yang kamu miliki telah habis. Alip ternyata pemilik slot tersebut,ia mengorbankan pertemanan demi uang. kamu terlilit hutang hidupmu kacaw kamu depresi dan mengakhiri hidup.. ALIP-777?");
+}
+
+function richStop(){
+  state.ended=true;
+  save();
+  endingScreen("Kamu memilih berhenti bermain setelah mendapat cukup yibu. Hidupmu membaik dan dengan modal yang kamu pegang hidupmu sukses menjadi CI IO GROUP WIJAYA.");
+}
+
+function endingScreen(message){
+  render(`
+    <div class="panel center">
+      <div style="font-size:60px">🏁</div>
+      <h1>AKHIR CERITA</h1>
+      <p>${message || "Permainan telah selesai."}</p>
+      <p>Saldo akhir: <b class="gold">${money(state.balance)} yibu</b></p>
+      <button onclick="resetGame()">MULAI DARI AWAL</button>
+    </div>
+  `);
+}
+
+function resetGame(){
+  roundId++;
+  busy=false;
+  state=newState();
+  board=[];
+  multipliers=[];
+  save();
+  storyIntro();
+}
+
+/* JALANKAN */
+load();
+
+if(state.ended){
+  endingScreen();
+}else if(state.started){
+  menu();
+}else{
+  storyIntro();
+}
+</script>
+</body>
+  </html>
+  
